@@ -157,25 +157,53 @@ const jsc: NonNullable<NonNullable<Options['swc']>['jsc']> = { target: 42 }
 void jsc
 `, 2322],
     ] as const
-    for (const [name, source, diagnostic] of controls) {
+    for (const [name, source] of controls) {
       await fs.writeFile(path.join(consumer, `${name}.ts`), source)
-      const config = path.join(consumer, `${name}.json`)
-      await fs.writeFile(config, JSON.stringify({
-        compilerOptions: {
-          target: 'ESNext', module: 'Preserve', moduleResolution: 'Bundler',
-          strict: true, skipLibCheck: false, paths: {}, noEmit: true, types: ['node'],
-        },
-        files: [`${name}.ts`],
-      }))
+    }
+    const compilerOptions = {
+      target: 'ESNext', module: 'Preserve', moduleResolution: 'Bundler',
+      strict: true, skipLibCheck: false, paths: {}, noEmit: true, types: ['node'],
+    }
+    for (const [name, files] of [
+      ['positive', ['positive.ts']],
+      ['negative', ['invalid-syntax.ts', 'invalid-target.ts']],
+    ] as const) {
+      await fs.writeFile(path.join(consumer, `${name}.json`), JSON.stringify({ compilerOptions, files }))
+    }
+    // Share the original three 5s compiler allowances across these two loads.
+    // Each child receives only the time left in the single compiler phase.
+    const compilerDeadline = performance.now() + 15000
+    const compile = async (name: string) => {
+      const remaining = compilerDeadline - performance.now()
+      expect(remaining, 'The shared 15s compiler phase is exhausted').toBeGreaterThan(0)
       const compiled = await run([
         process.execPath, path.join(root, 'node_modules/typescript/bin/tsc'),
-        '--project', config, '--pretty', 'false',
-      ], consumer, 5000)
-      expect(compiled.code, compiled.output).toBe(diagnostic === null ? 0 : 2)
-      expect([...compiled.output.matchAll(/error TS(\d+):/g)].map((match) => Number(match[1])))
-        .toEqual(diagnostic === null ? [] : [diagnostic])
-      if (diagnostic !== null) expect(compiled.output).toContain(`${name}.ts(`)
+        '--project', path.join(consumer, `${name}.json`), '--pretty', 'false',
+      ], consumer, remaining)
+      expect(performance.now(), 'The shared 15s compiler phase elapsed').toBeLessThanOrEqual(compilerDeadline)
+      return compiled
     }
+    // Keep the positive independent. The two negative modules can share one
+    // load of the public declaration graph without sharing local bindings.
+    const positive = await compile('positive')
+    expect(positive.code, positive.output).toBe(0)
+    expect(positive.output.match(/error TS\d+:/g) ?? []).toEqual([])
+    const negative = await compile('negative')
+    expect(negative.code, negative.output).toBe(2)
+    const diagnostics = negative.output.trim().split(/\r?\n/).map((line) => {
+      const match = line.match(/^(.+)\((\d+),(\d+)\): error TS(\d+): (.+)$/)
+      if (!match) throw new Error(`Unexpected compiler output: ${line}`)
+      return {
+        file: path.resolve(consumer, match[1]),
+        line: Number(match[2]),
+        column: Number(match[3]),
+        code: Number(match[4]),
+      }
+    })
+    expect(diagnostics, negative.output).toEqual([
+      { file: path.join(consumer, 'invalid-syntax.ts'), line: 2, column: 74, code: 2322 },
+      { file: path.join(consumer, 'invalid-target.ts'), line: 2, column: 64, code: 2322 },
+    ])
   } finally {
     await fs.rm(temporary, { recursive: true, force: true })
   }
