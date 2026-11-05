@@ -3,13 +3,16 @@
  */
 import path from 'node:path'
 import { localRequire } from '../utils'
-import type { JscConfig, Options } from '@swc/core'
+import type { JscConfig, Options } from '@swc/types'
 import type { Plugin } from 'esbuild'
 import type { Logger } from '../log'
 
 export type SwcPluginConfig = { logger: Logger } & Options
 
-export const swcPlugin = ({ logger, ...swcOptions }: SwcPluginConfig): Plugin => {
+export const swcPlugin = ({
+  logger,
+  ...swcOptions
+}: SwcPluginConfig): Plugin => {
   return {
     name: 'swc',
 

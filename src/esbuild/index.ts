@@ -6,7 +6,7 @@ import {
   build as esbuild,
   formatMessages,
 } from 'esbuild'
-import consola from 'consola'
+import { consola } from 'consola'
 import { getProductionDeps, loadPkg } from '../load'
 import { type Logger, getSilent } from '../log'
 import { defaultOutExtension, truthy } from '../utils'
